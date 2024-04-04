@@ -1,0 +1,4 @@
+aiohttp==3.9.3
+reflex==0.4.6
+shellingham==1.5.4
+reflex
