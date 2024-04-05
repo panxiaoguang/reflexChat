@@ -6,29 +6,30 @@ import json
 import aiohttp
 import os
 
-messages = [{"role": "system", "content": "You are a smart and versatile artificial intelligence assistant. You will faithfully follow the user's instructions to solve and answer questions. Your answers are detailed and professional, and they do not contain offensive information."}]
-
 
 class ChatState(rx.State):
     """The app state."""
     chat_history: list[tuple[str, str]]
+    _messages = [{"role": "system", "content": "You are a smart and versatile artificial intelligence assistant. You will faithfully follow the user's instructions to solve and answer questions. Your answers are detailed and professional, and they do not contain offensive information."}]
     question: str
     model: str = "qwen/qwen1.5-14b-chat-awq"
+    Generation: bool = False
 
+    @rx.background
     async def get_answer(self):
         async with aiohttp.ClientSession() as session:
             answer = ""
-            self.chat_history.append((self.question, answer))
-            messages.append({"role": "user", "content": self.question})
-            print(messages)
-            self.question = ""
-            yield
+            async with self:
+                self._messages.append(
+                    {"role": "user", "content": self.question})
+                self.chat_history.append((self.question, answer))
+                self.question = ""
             # Construct the post request to the API.
             async with session.post(
                 f"https://gateway.ai.cloudflare.com/v1/{os.environ['ID']}/workers-ai/workers-ai/@cf/{self.model}",
                 headers={"Authorization": f"Bearer {os.environ['API_TOKEN']}"},
                 json={
-                    "messages": messages,
+                    "messages": self.get_value(self._messages),
                     "stream": True,
                     "max_tokens": 2048
                 }
@@ -37,27 +38,39 @@ class ChatState(rx.State):
                 if response.status == 200:
                     # Asynchronously process each line in the streaming response.
                     async for line in response.content:
+                        async with self:
+                            if not self.Generation:
+                                return
                         decoded_line = line.decode('utf-8').strip()
                         if decoded_line.startswith('data: '):
                             json_data = decoded_line[len('data: '):]
                             # Handle the JSON data.
                             if decoded_line == 'data: [DONE]':
-                                break
+                                async with self:
+                                    self.Generation = not self.Generation
+                                    self._messages.append(
+                                        {"role": "assistant", "content": answer})
+                                    return
                             else:
                                 data = json.loads(json_data)
                                 answer += data.get('response')
-                                self.chat_history[-1] = (
-                                    self.chat_history[-1][0], answer)
-                                yield
-                                # push the final response to the role of system
-                    messages.append({"role": "system", "content": answer})
-                    print(self.chat_history)
+                                async with self:
+                                    self.chat_history[-1] = (
+                                        self.chat_history[-1][0], answer)
+                                    # push the final response to the role of system
                 else:
-                    self.chat_history[-1] = (self.chat_history[-1][0],
-                                             f"Failed to fetch data: {response.status}")
+                    async with self:
+                        self.chat_history[-1] = (self.chat_history[-1][0],
+                                                 f"Failed to fetch data: {response.status}")
 
     def clear_answer(self):
         self.chat_history = []
+        self._messages = [{"role": "system", "content": "You are a smart and versatile artificial intelligence assistant. You will faithfully follow the user's instructions to solve and answer questions. Your answers are detailed and professional, and they do not contain offensive information."}]
+
+    def toggle_running(self):
+        self.Generation = not self.Generation
+        if self.Generation:
+            return ChatState.get_answer()
 
 
 def navebar() -> rx.Component:
@@ -174,23 +187,27 @@ def action_bar() -> rx.Component:
             auto_height=True,
         ),
         rx.button(
-            "Ask",
+            rx.cond(
+                ~ChatState.Generation,
+                "Generate",
+                "Stop"
+            ),
             height="4.5em",
-            width="6em",
+            width="6.5em",
             variant="soft",
             radius="medium",
             _hover={"cursor": "pointer"},
-            on_click=ChatState.get_answer,
+            on_click=ChatState.toggle_running,
         ),
         rx.button(
-            "clear",
+            "New Chat",
             height="4.5em",
-            width="6em",
+            width="6.5em",
             class_name="text-2xl",
             radius="medium",
             on_click=ChatState.clear_answer,
             _hover={"cursor": "pointer"},
-            color_scheme="red",
+            color_scheme="iris",
         ),
         spacing="1",
         justify="center",
