@@ -27,6 +27,15 @@ reflex run
 
 4. Open the browser and navigate to `http://localhost:3000`
 
+## Feature:
+- Support all text generation models in Cloudlfare workers AI
+- Support stream generation
+- start and stop
+- new conversation
+- chat memories(context)
+- Not support mobile display ( I can do that because too naive)
+
+
 ## demo
 
 https://reflexchat.reflex.run/
